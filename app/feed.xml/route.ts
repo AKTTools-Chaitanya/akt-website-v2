@@ -28,7 +28,9 @@ function stripHtml(s: unknown): string {
 }
 
 export async function GET() {
-  const products = await getAllProductsForFeed();
+  // Degrade to an empty feed if Meili is unreachable (e.g. during the CI image build) rather
+  // than failing the build/response; it regenerates hourly (revalidate) once the index is live.
+  const products = await getAllProductsForFeed().catch(() => []);
 
   const items = products
     .map((p) => {

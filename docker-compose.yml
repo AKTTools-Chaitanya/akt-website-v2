@@ -1,0 +1,58 @@
+# Base stack for AKTTOOLS Website V2.
+#   - web        : Next.js standalone server (reuses the EXTERNAL react-api — no DB here)
+#   - meilisearch: search + catalog index (internal only; the web container reaches it by name)
+#
+# The web container publishes to 127.0.0.1:3000 ONLY. On the CloudPanel KVM8 box, CloudPanel's
+# own nginx owns 80/443 and reverse-proxies v2.mrtechnobaba.co.in -> 127.0.0.1:3000. So this
+# stack must NOT bind public ports (unlike the Institute CRM which owns its VPS's nginx).
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://v2.mrtechnobaba.co.in}
+        NEXT_PUBLIC_GTM_ID: ${NEXT_PUBLIC_GTM_ID:-}
+        NEXT_PUBLIC_INDEXABLE: ${NEXT_PUBLIC_INDEXABLE:-false}
+    container_name: aktv2-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # Backend JSON API (react-api). Staging for now; self-signed cert allowed on staging only.
+      API_BASE_URL: ${API_BASE_URL:-https://mrtechnobaba.co.in}
+      API_ALLOW_SELF_SIGNED: ${API_ALLOW_SELF_SIGNED:-true}
+      # Search — talk to the meilisearch service over the compose network.
+      MEILI_HOST: http://meilisearch:7700
+      MEILI_ADMIN_KEY: ${MEILI_MASTER_KEY}
+      AUTH_COOKIE_SECRET: ${AUTH_COOKIE_SECRET}
+      # Also provided at runtime so server-side config reads resolve (client bundle is build-inlined).
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://v2.mrtechnobaba.co.in}
+      NEXT_PUBLIC_GTM_ID: ${NEXT_PUBLIC_GTM_ID:-}
+      NEXT_PUBLIC_INDEXABLE: ${NEXT_PUBLIC_INDEXABLE:-false}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - meilisearch
+    networks:
+      - aktv2
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: aktv2-meili
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meili_data:/meili_data
+    # Internal only — no host ports. Reachable at http://meilisearch:7700 inside the network.
+    networks:
+      - aktv2
+
+networks:
+  aktv2:
+    driver: bridge
+
+volumes:
+  meili_data:

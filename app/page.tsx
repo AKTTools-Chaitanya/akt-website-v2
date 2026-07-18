@@ -16,10 +16,14 @@ export const revalidate = 120;
 
 export default async function Home() {
   // Rails come from real data: discounts + just-added from Meili, popular + brands from api-home.
+  // The image is built in CI where the API/Meili aren't reachable; degrade to empty so the
+  // build never fails. Real data fills in at runtime (ISR revalidate=120) on the server, and
+  // this also means a transient backend blip can't 500 the homepage in production.
+  const emptyRail = { hits: [], total: 0, page: 1, totalPages: 1, facets: {}, query: '' };
   const [home, discounts, justAdded] = await Promise.all([
-    getHome(),
-    searchProducts({ q: '', filter: 'in_stock = true', sort: ['discount_pct:desc'], hitsPerPage: 12, facets: [] }),
-    searchProducts({ q: '', filter: 'in_stock = true', sort: ['created_ts:desc'], hitsPerPage: 12, facets: [] }),
+    getHome().catch(() => null),
+    searchProducts({ q: '', filter: 'in_stock = true', sort: ['discount_pct:desc'], hitsPerPage: 12, facets: [] }).catch(() => emptyRail),
+    searchProducts({ q: '', filter: 'in_stock = true', sort: ['created_ts:desc'], hitsPerPage: 12, facets: [] }).catch(() => emptyRail),
   ]);
 
   return (
