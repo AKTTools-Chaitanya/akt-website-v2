@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { config, org } from '@/lib/config';
+import { TopBar } from '@/components/TopBar';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
+import { BottomNav } from '@/components/BottomNav';
 import { CartProvider } from '@/lib/cart';
 import { Analytics, AnalyticsNoScript } from '@/components/Analytics';
 import { JsonLd } from '@/components/JsonLd';
@@ -47,10 +49,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AnalyticsNoScript />
         <CartProvider>
           <div className="flex min-h-screen flex-col">
+            <TopBar />
             <Header />
             <main className="flex-1 pb-4">{children}</main>
             <Footer />
+            <div className="h-14 sm:hidden" aria-hidden />
           </div>
+          <BottomNav />
         </CartProvider>
       </body>
     </html>

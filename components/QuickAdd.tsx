@@ -27,7 +27,7 @@ export function QuickAdd({ item, disabled }: { item: Omit<CartItem, 'qty'>; disa
         type="button"
         onClick={stop(() => add(item, 1))}
         aria-label={`Add ${item.name} to cart`}
-        className="inline-flex h-9 items-center rounded-lg border border-brand/50 px-5 text-[13px] font-semibold text-brand transition hover:bg-brand hover:text-white"
+        className="inline-flex h-9 items-center rounded-lg border border-brand/50 px-4 text-[13px] font-semibold text-brand transition hover:bg-brand hover:text-white sm:px-5"
       >
         Add
       </button>
