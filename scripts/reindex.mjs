@@ -7,7 +7,8 @@
  *
  * Schedule on the server via cron (e.g. every 15 min) to keep the index fresh.
  */
-import { MeiliSearch } from 'meilisearch';
+// No SDK import — talk to Meilisearch over its REST API with fetch, so this script runs inside
+// the slim Next standalone image (which tree-shakes the `meilisearch` package out of node_modules).
 
 if (process.env.API_ALLOW_SELF_SIGNED === 'true') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -38,6 +39,37 @@ async function apiPost(path, body = {}) {
   });
   if (!res.ok) throw new Error(`POST ${path} → ${res.status}`);
   return res.json();
+}
+
+/** Minimal Meilisearch REST helper (replaces the SDK). */
+async function meili(path, { method = 'GET', body } = {}) {
+  const res = await fetch(`${MEILI_HOST}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${MEILI_KEY}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Meili ${method} ${path} → ${res.status} ${t}`);
+  }
+  return res.json();
+}
+
+/** Poll an async Meili task until it succeeds (or throw on failure/timeout). */
+async function waitForTask(taskUid, timeoutMs = 60000) {
+  const start = Date.now();
+  for (;;) {
+    const task = await meili(`/tasks/${taskUid}`);
+    if (task.status === 'succeeded') return task;
+    if (task.status === 'failed' || task.status === 'canceled') {
+      throw new Error(`Meili task ${taskUid} ${task.status}: ${JSON.stringify(task.error || {})}`);
+    }
+    if (Date.now() - start > timeoutMs) throw new Error(`Meili task ${taskUid} timed out`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 /** Build cat_id → {name,slug}, scat_id → {…}, sscat_id → {…} maps from the category tree. */
@@ -119,28 +151,32 @@ async function main() {
   const docs = mains.map((p) => toDoc(p, { ...maps, brand }));
   console.log(`  ${raw.length} rows → ${docs.length} main products to index`);
 
-  const client = new MeiliSearch({ host: MEILI_HOST, apiKey: MEILI_KEY });
-  const index = client.index(INDEX);
-
-  const settingsTask = await index.updateSettings({
-    searchableAttributes: ['pro_name', 'tags', 'sku', 'brand_name', 'cat_name', 'scat_name', 'sscat_name'],
-    filterableAttributes: [
-      'brand_slug', 'brand_name', 'cat_slug', 'cat_name', 'scat_slug', 'scat_name',
-      'sscat_slug', 'sscat_name', 'in_stock', 'price', 'cat_id', 'scat_id', 'brand_id',
-    ],
-    sortableAttributes: ['price', 'discount_pct', 'created_ts'],
-    rankingRules: ['words', 'typo', 'proximity', 'attribute', 'sort', 'exactness'],
+  // PATCH settings (auto-creates the index with the given primary key if absent).
+  const settingsTask = await meili(`/indexes/${INDEX}/settings`, {
+    method: 'PATCH',
+    body: {
+      searchableAttributes: ['pro_name', 'tags', 'sku', 'brand_name', 'cat_name', 'scat_name', 'sscat_name'],
+      filterableAttributes: [
+        'brand_slug', 'brand_name', 'cat_slug', 'cat_name', 'scat_slug', 'scat_name',
+        'sscat_slug', 'sscat_name', 'in_stock', 'price', 'cat_id', 'scat_id', 'brand_id',
+      ],
+      sortableAttributes: ['price', 'discount_pct', 'created_ts'],
+      rankingRules: ['words', 'typo', 'proximity', 'attribute', 'sort', 'exactness'],
+    },
   });
-  await client.waitForTask(settingsTask.taskUid);
+  await waitForTask(settingsTask.taskUid);
 
   const BATCH = 1000;
   for (let i = 0; i < docs.length; i += BATCH) {
-    const task = await index.addDocuments(docs.slice(i, i + BATCH), { primaryKey: 'id' });
-    await client.waitForTask(task.taskUid, { timeOutMs: 60000 });
+    const task = await meili(`/indexes/${INDEX}/documents?primaryKey=id`, {
+      method: 'POST',
+      body: docs.slice(i, i + BATCH),
+    });
+    await waitForTask(task.taskUid, 60000);
     console.log(`  indexed ${Math.min(i + BATCH, docs.length)}/${docs.length}`);
   }
 
-  const stats = await index.getStats();
+  const stats = await meili(`/indexes/${INDEX}/stats`);
   console.log(`✓ done. Meili '${INDEX}' now has ${stats.numberOfDocuments} documents.`);
 }
 
