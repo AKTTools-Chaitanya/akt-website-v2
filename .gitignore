@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+build/
+# Env — keep .env.example tracked, ignore every real env file (may hold secrets).
+.env
+.env.local
+.env*.local
+.env.production
+*.log
+.DS_Store
+next-env.d.ts
+# TypeScript incremental build cache (regenerated)
+*.tsbuildinfo
+# Stray generated sitemap dump — the app serves sitemap dynamically via app/sitemap.ts
+sm.xml
+# Local Meilisearch data, coverage, misc
+meili-db/
+coverage/
+.turbo/
