@@ -46,7 +46,12 @@ services:
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - meili_data:/meili_data
-    # Internal only — no host ports. Reachable at http://meilisearch:7700 inside the network.
+    ports:
+      # Loopback ONLY (127.0.0.1): the legacy PHP site on this box reaches Meili here for its
+      # instant/smart search (server-side, search-only key). Inside the compose network the web
+      # container still uses http://meilisearch:7700 by name. NOT public — CloudPanel nginx owns
+      # 80/443; never bind 0.0.0.0 here.
+      - "127.0.0.1:7700:7700"
     networks:
       - aktv2
 
