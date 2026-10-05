@@ -4,7 +4,8 @@ Deploys `v2.mrtechnobaba.co.in` on the **CloudPanel KVM8** box (same server as `
 Flow: **push to `main` → GitHub Action builds image → pushes to GHCR → SSHes in → `docker compose up`**.
 
 Key difference from the CRM: CloudPanel already owns nginx/80/443, so this stack binds only
-`127.0.0.1:3000` and **CloudPanel reverse-proxies** the domain to it. Meili stays internal.
+`127.0.0.1:3000` and **CloudPanel reverse-proxies** the domain to it. Meili is published on
+loopback only (`127.0.0.1:7700`) because the production PHP site reads it for instant search.
 
 ---
 
@@ -68,19 +69,35 @@ it up by hand the first time:
 cd /opt/akt-website-v2
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-gh-user> --password-stdin   # PAT w/ read:packages
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T web node scripts/reindex.mjs
 ```
+Do **not** index as part of bringing the stack up — see the next section. The `products` index is
+owned by a separate production refresh job and is already populated.
+
 Verify: `curl -I http://127.0.0.1:3000` → `200`, then open `https://v2.mrtechnobaba.co.in`.
 
 ## Keep the search index fresh (cron)
-The workflow reindexes on every deploy. For ongoing freshness add a cron on the KVM8 box:
+Deploys do **not** index anything. The `products` index is refreshed from the **production** api
+every 15 minutes by a server-side script on the KVM8 box:
 ```bash
-# every 15 min — rebuild Meili from the live catalog (read-only, no DB creds)
-*/15 * * * * cd /opt/akt-website-v2 && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T web node scripts/reindex.mjs >/var/log/aktv2-reindex.log 2>&1
+*/15 * * * * /opt/akt-website-v2/scripts/refresh_products.sh >>/var/log/akt-website-search.log 2>&1  # akt-website-search
 ```
+`refresh_products.sh` takes an `flock` (so runs cannot overlap), builds a clean `products_next`
+with `reindex_prod.mjs`, then `promote_products.mjs` swaps it in atomically via Meilisearch
+`/swap-indexes`. Consequences worth knowing:
+
+- the live index is never emptied or partially populated — searchers see the old generation or the new one;
+- each run is a clean rebuild, so products that are no longer eligible are **dropped** (the old job only upserted, so they accumulated);
+- `reindex_prod.mjs` refuses to run against any source other than the production api, and refuses to write `products` directly.
+
+Do **not** run `scripts/reindex.mjs` on this server. It reads `API_BASE_URL` (staging here) and
+upserts into the live index in place — that is exactly what served staging prices in production
+website search until 2026-10-04. It is kept only as a local-development tool (`npm run reindex`).
 
 ## Notes / safety
 - Staging is **non-indexable** (`NEXT_PUBLIC_INDEXABLE=false`) → robots noindex, no sitemap tags. Google never sees it.
-- Reuses the **existing react-api** (staging) — no PHP/DB changes, zero prod impact.
-- `web` is bound to loopback only; Meili has **no** host port. Nothing new is publicly exposed except the CloudPanel-proxied domain.
+- Reuses the **existing react-api** — no PHP/DB changes. But this stack is **not** prod-isolated:
+  the `products` Meili index it owns is also read by the production site's instant/smart search
+  (`akinfotools.com`), so anything that writes that index affects production.
+- `web` is bound to loopback only. Meili **is** published, on `127.0.0.1:7700`, so the production
+  PHP site can reach it; loopback only, nothing publicly exposed except the CloudPanel-proxied domain.
 - Rollback: `docker compose ... pull web` a previous `sha-XXXX` tag, or restore the prior image; instant.
