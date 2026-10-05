@@ -110,9 +110,13 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps --force-recreate web
 
-            echo "Rebuilding the Meili index from live catalog..."
-            sleep 5
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T web node scripts/reindex.mjs || echo "reindex will retry via cron"
+            # Search indexing is deliberately NOT part of deploys.
+            # The website `products` index is refreshed from PRODUCTION every 15 minutes by
+            # /opt/akt-website-v2/scripts/refresh_products.sh:
+            #   reindex_prod.mjs -> products_next -> promote_products.mjs -> atomic swap -> products
+            # scripts/reindex.mjs reads the STAGING api and upserts in place, so running it
+            # here would overwrite live production search data with staging data and would
+            # never drop products that are no longer eligible. Do not re-add it.
 
             echo "Cleaning up old images..."
             docker image prune -f
